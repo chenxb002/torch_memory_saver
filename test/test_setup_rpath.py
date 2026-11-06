@@ -48,3 +48,18 @@ def test_hip_extensions_are_untouched(monkeypatch):
     ext_modules = _setup_ext_modules(monkeypatch, "hip")
     for ext in ext_modules:
         assert ext.extra_link_args == [], ext.name
+
+
+def test_mlu_extensions_use_neuware_without_cuda(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEUWARE_HOME", str(tmp_path))
+    extensions = _setup_ext_modules(monkeypatch, "mlu")
+    assert {ext.name for ext in extensions} == {
+        "torch_memory_saver_hook_mode_preload",
+        "torch_memory_saver_hook_mode_torch",
+    }
+    for ext in extensions:
+        assert ext.include_dirs == [str(tmp_path / "include")]
+        assert ext.library_dirs == [str(tmp_path / "lib64")]
+        assert ext.libraries == ["cndrv", "cnrt", "dl"]
+        assert ("USE_MLU", "1") in ext.define_macros
+        assert ("USE_CUDA", "1") not in ext.define_macros

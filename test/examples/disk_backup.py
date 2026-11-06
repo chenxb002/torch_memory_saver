@@ -5,6 +5,7 @@ import sys
 import tempfile
 
 import torch
+from torch_memory_saver.testing_utils import get_device, get_device_module, is_mlu
 
 from torch_memory_saver import torch_memory_saver
 
@@ -30,14 +31,14 @@ def _run(disk_dir: str):
 
     print("Allocate tensor_with_disk_backup")
     with torch_memory_saver.region(enable_disk_backup=True):
-        big = torch.randn((numel,), dtype=torch.float32, device='cuda')
-        small = torch.full((7,), 10, dtype=torch.uint8, device='cuda')
+        big = torch.randn((numel,), dtype=torch.float32, device=get_device())
+        small = torch.full((7,), 10, dtype=torch.uint8, device=get_device())
     big_oracle = big.detach().to('cpu').clone()
     small_oracle = small.detach().to('cpu').clone()
 
     print("Allocate tensor_without_backup")
     with torch_memory_saver.region(enable_disk_backup=False):
-        no_backup = torch.full((20_000_000,), 20, dtype=torch.uint8, device='cuda')
+        no_backup = torch.full((20_000_000,), 20, dtype=torch.uint8, device=get_device())
 
     assert torch.equal(big.cpu(), big_oracle)
     assert no_backup[:3].tolist() == [20, 20, 20]
@@ -52,15 +53,21 @@ def _run(disk_dir: str):
         assert total >= big.numel() * 4, f"backup smaller than the paused tensor: {total}"
         disk_sizes.add(total)
 
-        occupy = torch.full((20_000_000,), 30, dtype=torch.uint8, device='cuda')
+        occupy = torch.full((20_000_000,), 30, dtype=torch.uint8, device=get_device())
         del occupy
-        torch.cuda.empty_cache()
+        get_device_module().empty_cache()
 
         torch_memory_saver.resume()
 
         assert torch.equal(big.cpu(), big_oracle)
         assert torch.equal(small.cpu(), small_oracle)
-        assert no_backup[:3].tolist() != [20, 20, 20]
+        if is_mlu():
+            # CNDriver may reuse the same physical pages. Unbacked contents
+            # are unspecified; verify the restored allocation is writable.
+            no_backup.fill_(37)
+            assert torch.all(no_backup == 37).item()
+        else:
+            assert no_backup[:3].tolist() != [20, 20, 20]
 
     assert len(disk_sizes) == 1, f"disk usage grew across cycles: {sorted(disk_sizes)}"
     print(f"OK: {big.numel()} fp32 elems restored bit-identically across 3 cycles, "

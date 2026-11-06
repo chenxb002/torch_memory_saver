@@ -5,9 +5,14 @@ import os
 import sys
 
 import torch
+from torch_memory_saver.testing_utils import (
+    empty_cache,
+    get_device,
+    get_device_module,
+    is_mlu,
+)
 
 from torch_memory_saver import torch_memory_saver
-from torch_memory_saver.testing_utils import empty_cache, get_device
 
 
 def run(hook_mode: str):
@@ -17,8 +22,8 @@ def run(hook_mode: str):
     device = get_device()
 
     # Pause/resume keeps backup contents; without backup, contents are lost.
-    # mmap is CUDA-only. ROCm default is pinned; XPU does not take a backend.
-    if device == "cuda" and not torch.version.hip:
+    # CUDA and MLU support mmap. ROCm default is pinned; XPU does not take a backend.
+    if device in ("cuda", "mlu") and not torch.version.hip:
         backends = ["mmap", "pinned"]
     else:
         backends = [None]
@@ -49,23 +54,29 @@ def run(hook_mode: str):
         torch_memory_saver.resume()
 
         assert tensor_with_backup[:3].tolist() == [10, 10, 10]
-        assert tensor_without_backup[:3].tolist() != [20, 20, 20]
-        # ROCm retains host backup across resume; CUDA/XPU release it.
+        if is_mlu():
+            # CNDriver may reuse the same physical pages. Unbacked contents
+            # are unspecified; verify the restored allocation is writable.
+            tensor_without_backup.fill_(37)
+            assert torch.all(tensor_without_backup == 37).item()
+        else:
+            assert tensor_without_backup[:3].tolist() != [20, 20, 20]
+        # ROCm retains host backup across resume; CUDA, MLU and XPU release it.
         if not torch.version.hip:
             assert torch_memory_saver.get_cpu_backup(typed_tensor_with_backup) is None
 
         del tensor_with_backup, typed_tensor_with_backup, tensor_without_backup, tensor_unrelated
         empty_cache()
 
-    if device == "cuda" and not torch.version.hip:
+    if device in ("cuda", "mlu") and not torch.version.hip:
         # Pageable H2D must finish before resume returns (non-default stream).
         n = 64 * 1024 * 1024
         with torch_memory_saver.region(enable_cpu_backup=True, cpu_backup_backend="mmap"):
             restored = torch.full((n,), 7, dtype=torch.uint8, device=device)
         torch_memory_saver.pause()
         torch_memory_saver.resume()
-        stream = torch.cuda.Stream()
-        with torch.cuda.stream(stream):
+        stream = get_device_module().Stream()
+        with get_device_module().stream(stream):
             out = restored.clone()
         stream.synchronize()
         assert int(out[0].item()) == 7
@@ -99,9 +110,9 @@ def run(hook_mode: str):
 
     # Tags remain independent, and retained host storage is reused at the same
     # address while its bytes are refreshed. Exercise every visible device.
-    if device == "cuda" and not torch.version.hip:
-        for device_id in range(torch.cuda.device_count()):
-            with torch.cuda.device(device_id):
+    if device in ("cuda", "mlu") and not torch.version.hip:
+        for device_id in range(get_device_module().device_count()):
+            with get_device_module().device(device_id):
                 selected_expected = _make_pattern(size=1024, offset=40 + device_id)
                 other_expected = _make_pattern(size=1024, offset=80 + device_id)
 
@@ -177,7 +188,7 @@ def run_multi_device_mmap_restore(hook_mode: str):
     tensors: list[torch.Tensor] = []
 
     for device_id, value in enumerate((7, 13)):
-        torch.cuda.set_device(device_id)
+        get_device_module().set_device(device_id)
         with torch_memory_saver.region(
             tag=f"mmap_restore_{device_id}",
             enable_cpu_backup=True,
@@ -188,30 +199,30 @@ def run_multi_device_mmap_restore(hook_mode: str):
                     (tensor_size,),
                     value,
                     dtype=torch.uint8,
-                    device=f"cuda:{device_id}",
+                    device=f"{get_device()}:{device_id}",
                 )
             )
 
     for device_id in range(2):
-        torch.cuda.set_device(device_id)
+        get_device_module().set_device(device_id)
         torch_memory_saver.pause(tag=f"mmap_restore_{device_id}")
 
-    torch.cuda.set_device(0)
+    get_device_module().set_device(0)
     torch_memory_saver.resume()
-    assert torch.cuda.current_device() == 0
+    assert get_device_module().current_device() == 0
 
     restored: list[torch.Tensor] = []
     for device_id, (tensor, value) in enumerate(zip(tensors, (7, 13), strict=True)):
-        stream = torch.cuda.Stream(device=device_id)
-        with torch.cuda.stream(stream):
+        stream = get_device_module().Stream(device=device_id)
+        with get_device_module().stream(stream):
             restored.append(tensor.clone())
         stream.synchronize()
         assert bool(torch.all(restored[-1] == value).item())
 
     del tensors, restored
     for device_id in range(2):
-        with torch.cuda.device(device_id):
-            torch.cuda.empty_cache()
+        with get_device_module().device(device_id):
+            get_device_module().empty_cache()
 
 
 def run_backend_from_env(hook_mode: str):
@@ -261,18 +272,18 @@ def run_preload_backend_from_env(hook_mode: str):
     assert cdll.tms_get_enable_cpu_backup()
     assert cdll.tms_get_cpu_backup_backend() == b"mmap"
 
-    torch.cuda.synchronize()
-    tensor = torch.full((tensor_bytes,), 10, dtype=torch.uint8, device="cuda")
-    torch.cuda.synchronize()
+    get_device_module().synchronize()
+    tensor = torch.full((tensor_bytes,), 10, dtype=torch.uint8, device=get_device())
+    get_device_module().synchronize()
     rss_after_alloc = rss_bytes()
 
     torch_memory_saver.pause()
-    torch.cuda.synchronize()
+    get_device_module().synchronize()
     rss_after_pause = rss_bytes()
     assert torch_memory_saver.get_cpu_backup(tensor) is not None
 
     torch_memory_saver.resume()
-    torch.cuda.synchronize()
+    get_device_module().synchronize()
     rss_after_resume = rss_bytes()
     assert tensor[:3].tolist() == [10, 10, 10]
     assert torch_memory_saver.get_cpu_backup(tensor) is None
@@ -298,18 +309,18 @@ def run_rss(hook_mode: str):
     torch_memory_saver.hook_mode = hook_mode
     logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
 
-    torch.cuda.synchronize()
+    get_device_module().synchronize()
     with torch_memory_saver.region(enable_cpu_backup=True, cpu_backup_backend="mmap"):
-        tensor = torch.full((tensor_bytes,), 7, dtype=torch.uint8, device="cuda")
-    torch.cuda.synchronize()
+        tensor = torch.full((tensor_bytes,), 7, dtype=torch.uint8, device=get_device())
+    get_device_module().synchronize()
     rss_after_alloc = rss_bytes()
 
     torch_memory_saver.pause()
-    torch.cuda.synchronize()
+    get_device_module().synchronize()
     rss_after_pause = rss_bytes()
 
     torch_memory_saver.resume()
-    torch.cuda.synchronize()
+    get_device_module().synchronize()
     rss_after_resume = rss_bytes()
 
     assert int(tensor[0].item()) == 7
@@ -319,10 +330,13 @@ def run_rss(hook_mode: str):
     assert resume_delta <= -(tensor_bytes - tolerance_bytes), resume_delta
 
     del tensor
-    torch.cuda.empty_cache()
+    get_device_module().empty_cache()
 
 
 def _assert_cpu_backup_released_on_allocation_free(device: int, paused: bool) -> None:
+    host_pointer_is_allocated = (
+        _mlu_host_pointer_is_allocated if is_mlu() else _cuda_host_pointer_is_allocated
+    )
     state = "paused" if paused else "active"
     tag = f"retained_free_{state}_{device}"
     expected = _make_pattern(size=4096, offset=100 + device + int(paused))
@@ -335,7 +349,7 @@ def _assert_cpu_backup_released_on_allocation_free(device: int, paused: bool) ->
     backup = torch_memory_saver.get_cpu_backup(tensor, zero_copy=True)
     backup_pointer = backup.data_ptr()
     assert torch.equal(backup, expected)
-    assert _cuda_host_pointer_is_allocated(backup_pointer)
+    assert host_pointer_is_allocated(backup_pointer)
 
     if not paused:
         del backup
@@ -348,7 +362,7 @@ def _assert_cpu_backup_released_on_allocation_free(device: int, paused: bool) ->
     # MemPool key includes resolved cpu_backup_backend (default pinned).
     pool_key = (tag, True, False, "pinned", device)
     pool = torch_memory_saver._impl._mem_pools.pop(pool_key)
-    torch.cuda.synchronize(device)
+    get_device_module().synchronize(device)
     del backup
 
     with torch_memory_saver._impl._with_region_config(
@@ -359,10 +373,10 @@ def _assert_cpu_backup_released_on_allocation_free(device: int, paused: bool) ->
         del tensor
         del pool
         gc.collect()
-        torch.cuda.empty_cache()
+        get_device_module().empty_cache()
 
-    torch.cuda.synchronize(device)
-    assert not _cuda_host_pointer_is_allocated(backup_pointer)
+    get_device_module().synchronize(device)
+    assert not host_pointer_is_allocated(backup_pointer)
     torch_memory_saver.retain_cpu_backup = False
 
 
@@ -380,6 +394,29 @@ def _cuda_host_pointer_is_allocated(pointer: int) -> bool:
     if status != 0:
         cuda_get_last_error()
     return status == 0
+
+
+def _mlu_host_pointer_is_allocated(pointer: int) -> bool:
+    class PointerAttributes(ctypes.Structure):
+        _fields_ = [
+            ("type", ctypes.c_int),
+            ("device", ctypes.c_int),
+            ("size", ctypes.c_size_t),
+            ("devicePointer", ctypes.c_void_p),
+            ("hostPointer", ctypes.c_void_p),
+            ("cacheMode", ctypes.c_int),
+            ("deviceBasePointer", ctypes.c_void_p),
+        ]
+
+    get_attributes = torch_memory_saver._impl._binary_wrapper.cdll.cnrtPointerGetAttributes
+    get_attributes.argtypes = [ctypes.POINTER(PointerAttributes), ctypes.c_void_p]
+    get_attributes.restype = ctypes.c_int
+    attributes = PointerAttributes()
+    status = get_attributes(ctypes.byref(attributes), ctypes.c_void_p(pointer))
+    assert status == 0, f"cnrtPointerGetAttributes failed: {status}"
+    # cnrtMemTypeUnregistered = 0, cnrtMemTypeHost = 1.
+    assert attributes.type in (0, 1), attributes.type
+    return attributes.type == 1
 
 
 def _make_pattern(size: int, offset: int) -> torch.Tensor:

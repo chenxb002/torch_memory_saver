@@ -12,9 +12,14 @@ import sys
 from typing import Callable
 
 import torch
+from torch_memory_saver.testing_utils import (
+    get_and_print_gpu_memory,
+    get_device,
+    get_device_module,
+    get_graph_class,
+)
 import time
 from torch_memory_saver import torch_memory_saver
-from torch_memory_saver.testing_utils import get_and_print_gpu_memory
 
 # Define the size of a large tensor for simulating KV cache
 # Size: 5 * 100,000,000 * 4 bytes = 2GB
@@ -58,7 +63,7 @@ class Model:
         with torch_memory_saver.region(tag="model_weights"):
             # Create a large linear layer weight matrix.
             # Size: 20480 * 20480 * 4 bytes ≈ 1.6GB
-            self.linear = torch.nn.Linear(self.input_size, self.output_size, bias=False, device='cuda')
+            self.linear = torch.nn.Linear(self.input_size, self.output_size, bias=False, device=get_device())
             torch.nn.init.ones_(self.linear.weight)
 
         print(f'Model weights created: {_ptr(self.linear.weight)}')
@@ -90,7 +95,7 @@ class KVCache:
         with torch_memory_saver.region(tag="kv_cache"):
             # Create a large KV cache tensor.
             # Size: 5 * 100,000,000 * 4 bytes = 2GB
-            self.kv_buffer = torch.full(dummy_tensor_size, value, dtype=torch.float32, device='cuda')
+            self.kv_buffer = torch.full(dummy_tensor_size, value, dtype=torch.float32, device=get_device())
         print(f'KV cache created: {_ptr(self.kv_buffer)}')
 
     def clear_buffers(self):
@@ -111,14 +116,14 @@ def create_cuda_graph(fn: Callable):
     2. The importance of virtual address remaining unchanged for CUDA graphs.
     3. CUDA graphs can still execute correctly even when physical memory is reallocated.
     """
-    s = torch.cuda.Stream()
-    s.wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(s):
+    s = get_device_module().Stream()
+    s.wait_stream(get_device_module().current_stream())
+    with get_device_module().stream(s):
         fn()
-    torch.cuda.current_stream().wait_stream(s)
+    get_device_module().current_stream().wait_stream(s)
 
-    g = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(g):
+    g = get_graph_class()()
+    with get_device_module().graph(g):
         fn()
 
     return g
@@ -168,8 +173,8 @@ def run(hook_mode: str):
 
     # Create static input/output tensors for CUDA graphs
     # These tensors are not managed by torch_memory_saver, addresses will change normally
-    static_input = torch.zeros((20_480,), dtype=torch.float32, device='cuda')
-    static_output = torch.zeros((), dtype=torch.float32, device='cuda')
+    static_input = torch.zeros((20_480,), dtype=torch.float32, device=get_device())
+    static_output = torch.zeros((), dtype=torch.float32, device=get_device())
 
     def fn():
         """Function executed in CUDA graph: combine KV cache and model computation"""

@@ -29,6 +29,14 @@ def is_xpu() -> bool:
     return hasattr(torch, "xpu") and torch.xpu.is_available()
 
 
+def is_mlu() -> bool:
+    try:
+        import torch
+    except ImportError:
+        return False
+    return hasattr(torch, "mlu") and torch.mlu.is_available()
+
+
 def _detect_cuda_major() -> int:
     """Pick which libcudart major the hosting process will use.
 
@@ -80,7 +88,10 @@ def get_binary_path_from_package(stem: str):
     """
     dir_package = Path(__file__).parent
 
-    if _is_rocm_torch():
+    if is_mlu():
+        pattern = f"{stem}.*.so"
+        runtime_desc = "Cambricon MLU"
+    elif _is_rocm_torch():
         pattern = f"{stem}.*.so"
         runtime_desc = "ROCm/HIP torch"
     elif is_xpu():

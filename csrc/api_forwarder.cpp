@@ -10,6 +10,9 @@ namespace APIForwarder {
 #if defined(USE_ROCM)
     static constexpr const char* MALLOC_NAME = "hipMalloc";
     static constexpr const char* FREE_NAME = "hipFree";
+#elif defined(USE_MLU)
+    static constexpr const char* MALLOC_NAME = "cnrtMalloc";
+    static constexpr const char* FREE_NAME = "cnrtFree";
 #else
     static constexpr const char* MALLOC_NAME = "cudaMalloc";
     static constexpr const char* FREE_NAME = "cudaFree";

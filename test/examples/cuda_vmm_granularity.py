@@ -2,10 +2,11 @@ import ctypes
 import sys
 
 import torch
+from torch_memory_saver.testing_utils import is_mlu
 
 
 _UNALIGNED_SIZE = 6912
-_MEMCPY_HOST_TO_DEVICE = 1
+_MEMCPY_HOST_TO_DEVICE = 0 if is_mlu() else 1
 _MEMCPY_DEVICE_TO_HOST = 2
 
 
@@ -43,7 +44,7 @@ def _assert_round_trip(memcpy, ptr, expected):
 def run(hook_mode: str):
     assert hook_mode == "preload"
 
-    prefix = "hip" if torch.version.hip else "cuda"
+    prefix = "cnrt" if is_mlu() else ("hip" if torch.version.hip else "cuda")
     api = ctypes.CDLL(None)
     gpu_malloc = _bind(
         api, f"{prefix}Malloc", [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]

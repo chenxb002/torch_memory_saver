@@ -2,16 +2,26 @@
 
 import torch
 
-from torch_memory_saver.utils import is_xpu
+from torch_memory_saver.utils import is_mlu, is_xpu
 
 
 def get_device() -> str:
-    """Device string for tests: 'xpu' on Intel GPUs, else 'cuda'."""
-    return "xpu" if is_xpu() else "cuda"
+    """Device string for tests: mlu, xpu, or cuda."""
+    return "mlu" if is_mlu() else ("xpu" if is_xpu() else "cuda")
+
+
+def get_device_module():
+    return torch.mlu if is_mlu() else (torch.xpu if is_xpu() else torch.cuda)
+
+
+def get_graph_class():
+    return torch.mlu.MLUGraph if is_mlu() else torch.cuda.CUDAGraph
 
 
 def empty_cache():
-    if is_xpu():
+    if is_mlu():
+        torch.mlu.empty_cache()
+    elif is_xpu():
         torch.xpu.empty_cache()
     else:
         torch.cuda.empty_cache()
@@ -38,7 +48,10 @@ def _xpu_used_memory(gpu_id=0):
 
 def get_and_print_gpu_memory(message, gpu_id=0):
     """Print GPU memory usage with optional message."""
-    if is_xpu():
+    if is_mlu():
+        free, total = torch.mlu.mem_get_info(gpu_id)
+        mem = total - free
+    elif is_xpu():
         mem = _xpu_used_memory(gpu_id)
     elif torch.version.hip:
         # ROCm: amd-smi (device_memory_used) has delays, use mem_get_info for real-time tracking

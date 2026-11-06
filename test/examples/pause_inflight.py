@@ -2,7 +2,7 @@ import sys
 
 import torch
 from torch_memory_saver import torch_memory_saver
-from torch_memory_saver.testing_utils import get_device, is_xpu
+from torch_memory_saver.testing_utils import get_device, is_mlu, is_xpu
 
 
 def run(hook_mode: str, backup: str, device_count: int):
@@ -30,7 +30,7 @@ def run(hook_mode: str, backup: str, device_count: int):
             with mod.stream(stream):
                 buffer.fill_(11)
                 observed.copy_(buffer)
-                if is_xpu():
+                if is_xpu() or is_mlu():
                     delay_input = torch.ones((4096, 4096), device=device_type)
                     delay_output = torch.empty_like(delay_input)
                     torch.mm(delay_input, delay_input, out=delay_output)
@@ -63,7 +63,7 @@ def run(hook_mode: str, backup: str, device_count: int):
             with mod.stream(stream):
                 # Waiting on device 0 must not incidentally drain the non-current device.
                 if device == device_count - 1:
-                    if is_xpu():
+                    if is_xpu() or is_mlu():
                         # XPU has no _sleep; queue warmed-up work without new allocations.
                         delay_input, delay_output = delay_buffers[device]
                         for _ in range(64):

@@ -2,9 +2,13 @@ import logging
 import sys
 
 import torch
+from torch_memory_saver.testing_utils import (
+    get_and_print_gpu_memory,
+    get_device,
+    get_device_module,
+)
 
 from torch_memory_saver import torch_memory_saver
-from torch_memory_saver.testing_utils import get_and_print_gpu_memory, get_device
 
 
 def run(hook_mode: str):
@@ -12,7 +16,7 @@ def run(hook_mode: str):
     logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
 
     device = get_device()
-    set_device = torch.xpu.set_device if device == "xpu" else torch.cuda.set_device
+    set_device = torch.xpu.set_device if device == "xpu" else get_device_module().set_device
 
     checker = _MemoryChecker()
 
