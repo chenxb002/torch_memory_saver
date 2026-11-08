@@ -1,0 +1,48 @@
+{
+  "pr": "https://github.com/fzyzcjy/torch_memory_saver/pull/121",
+  "revision": "270146be26d4bb1ddd8445d2fd5425c9ef27a413",
+  "base": "651f641c0469bffc6af628bdf975c8ae02715909",
+  "h20_fresh_notebook": true,
+  "h20_fresh_venv": true,
+  "h20_system_site_packages": false,
+  "source_sha256": "dfba87e2f0a1d72af6487085c743a982947ccef645bb8c7a27272ea1f1b776e5",
+  "results": {
+    "h20_regression": "62 passed, 39 skipped in 84.21s",
+    "h20_utilities_and_tooling": "103 passed in 3.18s",
+    "h20_wheel_build_install_and_smoke": "passed with explicit in-region pool cleanup",
+    "mlu_utilities_and_tooling": "103 passed in 11.85s",
+    "mlu_wheel_build_install_and_smoke": "passed",
+    "mlu_regression": "90 passed, 10 skipped in 688.55s"
+  },
+  "mlu_environment": {
+    "python": "3.10.8 (main, Jun 26 2026, 16:14:18) [GCC 11.4.0]",
+    "torch": "2.14.0+cpu",
+    "torch_mlu": "1.35.0+torch2.14.0",
+    "pytest": "8.4.2",
+    "devices": [
+      "MLU590-M9DK",
+      "MLU590-M9DK"
+    ],
+    "system_site_packages": false
+  },
+  "cuda_environment": {
+    "python": "3.12.3",
+    "torch": "2.14.1+cu130",
+    "cuda": "13.0",
+    "devices": [
+      "NVIDIA H20-3e"
+    ],
+    "modules": {
+      "torch": "/workspace/tms-pr121-review/venv/lib/python3.12/site-packages/torch/__init__.py",
+      "typer": "/workspace/tms-pr121-review/venv/lib/python3.12/site-packages/typer/__init__.py",
+      "click": "/workspace/tms-pr121-review/venv/lib/python3.12/site-packages/click/__init__.py",
+      "pytest": "/workspace/tms-pr121-review/venv/lib/python3.12/site-packages/pytest/__init__.py"
+    },
+    "versions": {
+      "torch": "2.14.1+cu130",
+      "typer": "0.27.2",
+      "click": "8.4.2",
+      "pytest": "8.4.2"
+    }
+  }
+}
