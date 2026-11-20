@@ -1,12 +1,10 @@
 # PR #124 validation
 
-Validation of `dc1b67683d3eed5edbd4b39c3dc81b8530377ef1` on 2026-11-20.
+| Platform | Tested commit | Full regression | Packaging/setup/release tooling |
+| --- | --- | --- | --- |
+| CUDA / A100 | dc1b676 | 64 passed, 41 skipped | 84 passed |
+| MLU, two idle devices | 46e294a | 93 passed, 11 skipped | 84 passed |
 
-| Platform | Full regression | Packaging/setup/release tooling |
-| --- | --- | --- |
-| CUDA, one A100 | 64 passed, 41 skipped | 84 passed |
-| MLU, two visible devices on a shared host | 90 passed, 11 skipped, 3 failed (out of device memory) | 84 passed |
+Both commits have identical source trees; the amend only corrected commit identity metadata. All 24 MLU-specific cases passed. The previous three MLU OOM failures passed in the full rerun with free device memory.
 
-MLU's 24 backend-specific cases all passed, but its full suite did not pass: the two graph cases and training-engine case exhausted the remaining device memory. No tests were modified or excluded.
-
-Each ZIP includes complete logs, JUnit XML, commands, exit codes, environment information, scripts, and the exact source snapshot. Read the README inside each archive for coverage and initial-attempt details. SHA256SUMS records archive checksums.
+Use torch-memory-saver-mlu-46e294a.zip for the latest complete MLU report. The old MLU archive is retained as historical evidence. Each ZIP includes complete logs, JUnit XML, commands, exit statuses, environment details, scripts and source snapshot. SHA256SUMS records archive checksums.
